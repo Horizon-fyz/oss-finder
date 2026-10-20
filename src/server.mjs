@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { isSea, getAsset } from 'node:sea';
 import { search, explain } from './search.mjs';
 import { decide, renderReport } from './decide.mjs';
 import {
@@ -21,7 +22,7 @@ import { CAPABILITIES, CAP_BY_ID } from './taxonomy.mjs';
 import { loadConfig, llmReady } from './llm.mjs';
 import { PATHS, dateKey, writeText } from './lib.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+const HERE = isSea() ? path.dirname(process.execPath) : path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(HERE, '..', 'web');
 const CONFIG_FILE = path.join(PATHS.root, 'oss.config.json');
 
@@ -59,11 +60,35 @@ async function readBody(req, limit = 1_000_000) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+function maskKey(key) {
+  if (!key) return '';
+  if (key.length <= 8) return '••••••';
+  return `${key.slice(0, 4)}••••••${key.slice(-4)}`;
+}
+
+/** Key 来自环境变量还是配置文件：界面上要能看出它存在哪，避免误以为没保存 */
+function keySource(cfg) {
+  const envName = cfg.llm.apiKeyEnv;
+  if ((envName && process.env[envName]) || process.env.OPENAI_API_KEY) return 'env';
+  try {
+    const raw = JSON.parse(fs.readFileSync(cfg.file, 'utf8'));
+    if (raw?.llm?.apiKey) return 'file';
+  } catch {
+    // 配置文件不存在或读不了，按内存里的值判断
+  }
+  return cfg.llm.apiKey ? 'file' : null;
+}
+
 function configView(cfg) {
   const { apiKey, ...rest } = cfg.llm;
   return {
     profile: cfg.profile,
-    llm: { ...rest, apiKeySet: Boolean(apiKey) },
+    llm: {
+      ...rest,
+      apiKeySet: Boolean(apiKey),
+      apiKeyMasked: maskKey(apiKey),
+      apiKeySource: keySource(cfg),
+    },
     llmReady: llmReady(cfg.llm),
     file: cfg.file,
   };
@@ -206,19 +231,6 @@ export function startUpdate({ force = false, discoveryQueries, watchCount, hnLim
   return updatePromise;
 }
 
-/** 更新中默认拒绝检索，保证结果基于更新后的库；界面可选择「先用现有库」 */
-function updateGate(res, allowStale = false) {
-  if (updateState.status === 'running' && !allowStale) {
-    json(res, 409, {
-      error: '数据库正在更新，完成后自动解锁',
-      updating: true,
-      update: updateView(),
-    });
-    return true;
-  }
-  return false;
-}
-
 function bootstrap() {
   const cfg = loadConfig(CONFIG_FILE);
   const s = stats();
@@ -275,6 +287,13 @@ async function handleApi(req, res, url) {
     return json(res, 200, bootstrap());
   }
 
+  // 图形界面模式下没有控制台可关，由页面主动退出
+  if (p === '/api/quit' && req.method === 'POST') {
+    json(res, 200, { ok: true });
+    setTimeout(() => process.exit(0), 150);
+    return;
+  }
+
   if (p === '/api/update' && req.method === 'GET') {
     return json(res, 200, updateView());
   }
@@ -294,7 +313,6 @@ async function handleApi(req, res, url) {
   if (p === '/api/find' && req.method === 'GET') {
     const q = String(url.searchParams.get('q') ?? '').trim();
     if (!q) return json(res, 400, { error: '检索词不能为空' });
-    if (updateGate(res, url.searchParams.get('stale') === '1')) return;
     const resu = search(q, {
       limit: clamp(Number(url.searchParams.get('limit')) || 20, 1, 60),
       minStars: Number(url.searchParams.get('minStars')) || 0,
@@ -338,6 +356,12 @@ async function handleApi(req, res, url) {
     return json(res, 200, configView(loadConfig(CONFIG_FILE)));
   }
 
+  // 只有用户在设置页点「查看已保存」时才回传明文，避免明文常驻在 bootstrap 里
+  if (p === '/api/config/key' && req.method === 'GET') {
+    const cfg = loadConfig(CONFIG_FILE);
+    return json(res, 200, { apiKey: cfg.llm.apiKey, source: keySource(cfg) });
+  }
+
   if (p === '/api/config' && req.method === 'POST') {
     const body = await readBody(req);
     const cfg = saveConfig(body);
@@ -348,8 +372,7 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const need = String(body.need ?? '').trim();
     if (!need) return json(res, 400, { error: '需求不能为空' });
-    if (count() === 0) return json(res, 400, { error: '库里还没有数据，先运行 node oss.mjs harvest --full' });
-    if (updateGate(res, body.allowStale === true)) return;
+    if (count() === 0) return json(res, 400, { error: '库里还没有数据，先运行 oss harvest --full 建库' });
 
     const cfg = loadConfig(CONFIG_FILE);
     const result = await decide(need, {
@@ -399,6 +422,28 @@ function serveStatic(req, res, url) {
     return;
   }
   if (rel === '/') rel = '/index.html';
+  rel = path.posix.normalize(rel);
+  if (rel.includes('..')) {
+    res.writeHead(403).end('Forbidden');
+    return;
+  }
+
+  // exe 里前端资源随程序打包，直接读内置资源
+  if (isSea()) {
+    let data;
+    try {
+      data = Buffer.from(getAsset(`web${rel}`));
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not Found');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(rel).toLowerCase()] ?? 'application/octet-stream',
+      'Content-Length': data.length,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(data);
+  }
 
   const file = path.normalize(path.join(WEB_ROOT, rel));
   if (!file.startsWith(WEB_ROOT)) {
@@ -420,7 +465,7 @@ function serveStatic(req, res, url) {
   });
 }
 
-function openInBrowser(url) {
+export function openInBrowser(url) {
   const [cmd, args] =
     process.platform === 'win32'
       ? ['cmd', ['/c', 'start', '', url]]

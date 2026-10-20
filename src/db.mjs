@@ -1,12 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
-import { PATHS, dateKey, shiftDays } from './lib.mjs';
+import { PATHS, dateKey, shiftDays, ensureSeedDb } from './lib.mjs';
 
 let db = null;
 
 export function open(file = path.join(PATHS.data, 'oss.db')) {
   if (db) return db;
+  ensureSeedDb(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   db = new DatabaseSync(file);
   db.exec(`

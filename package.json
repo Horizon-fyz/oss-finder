@@ -10,9 +10,14 @@
     "harvest": "node oss.mjs harvest --per-day 10",
     "harvest:full": "node oss.mjs harvest --full",
     "retag": "node oss.mjs retag",
-    "stats": "node oss.mjs stats"
+    "stats": "node oss.mjs stats",
+    "build:exe": "node scripts/build-exe.mjs"
   },
   "engines": {
     "node": ">=22.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
   }
 }

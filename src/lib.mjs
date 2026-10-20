@@ -2,8 +2,13 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isSea, getAsset } from 'node:sea';
 
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** 打包成 exe 后以 exe 所在目录为根，data/reports/logs 与 exe 同级；源码运行时仍以项目根为根 */
+export const ROOT = isSea()
+  ? path.dirname(process.execPath)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
 export const PATHS = {
   root: ROOT,
   data: path.join(ROOT, 'data'),
@@ -12,6 +17,18 @@ export const PATHS = {
   state: path.join(ROOT, 'data', 'state.json'),
   latest: path.join(ROOT, 'data', 'latest.json'),
 };
+
+/** exe 首次运行：把内置示例库释放到 data/，不联网也能立刻检索 */
+export function ensureSeedDb(file) {
+  if (!isSea() || fsSync.existsSync(file)) return false;
+  try {
+    fsSync.mkdirSync(path.dirname(file), { recursive: true });
+    fsSync.writeFileSync(file, Buffer.from(getAsset('seed/oss.db')));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

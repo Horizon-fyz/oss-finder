@@ -525,6 +525,15 @@ svg {
   font-size: 11px;
 }
 
+.btn-danger {
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -1924,6 +1933,27 @@ svg {
 .field .suffix {
   color: var(--ash);
   font-size: 10.5px;
+}
+
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.key-preview {
+  padding: 7px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text);
+  word-break: break-all;
+  user-select: all;
 }
 
 .field textarea {

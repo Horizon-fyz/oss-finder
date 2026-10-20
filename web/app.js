@@ -233,7 +233,6 @@ const state = {
   capsQuery: '',
   pendingFind: null,
   update: null,
-  skipUpdate: false,
   updateTimer: 0,
   updateHideTimer: 0,
 };
@@ -328,10 +327,6 @@ function updateChrome() {
 
 /* ── 启动更新状态 ─────────────────────────────────────────── */
 
-function updateLocked() {
-  return state.update?.status === 'running' && !state.skipUpdate;
-}
-
 function phaseText(u) {
   const p = u.phase;
   if (!p) return '准备中…';
@@ -359,8 +354,7 @@ function renderUpdateBar() {
     bar.hidden = false;
     bar.className = 'update-bar';
     bar.innerHTML = `<span class="spinner"></span>
-      <span class="update-text">正在更新数据库 · <strong>${esc(phaseText(u))}</strong>${state.skipUpdate ? ' · 已允许先用现有库' : ' · 完成后自动解锁检索'}</span>
-      ${state.skipUpdate ? '' : '<button class="btn btn-sm" type="button" data-action="skip-update">先用现有库</button>'}`;
+      <span class="update-text">正在后台更新数据库 · <strong>${esc(phaseText(u))}</strong> · 可继续检索，完成后会提示刷新</span>`;
     return;
   }
 
@@ -415,7 +409,7 @@ async function handleUpdate(u) {
 
   if (prev === 'running') {
     await refreshBootstrap();
-    if (u.status === 'done') toast(`数据库已更新：${updateSummary(u)}`);
+    if (u.status === 'done') toast(`数据库已更新：${updateSummary(u)}；重新检索可看到新结果`);
     else if (u.status === 'error') toast('更新失败，检索继续使用现有库', true);
     else toast('已跳过本次更新');
   } else {
@@ -443,6 +437,22 @@ async function runUpdate() {
   }
 }
 
+async function quitApp() {
+  if (!confirm('退出 oss-finder？本地服务会停止。')) return;
+  try {
+    await api('/api/quit', { method: 'POST' });
+  } catch {
+    // 服务已退出时请求会失败，忽略
+  }
+  const c = $('#content');
+  if (c) {
+    c.innerHTML = `<div class="page"><div class="empty">
+      <h3>已退出</h3>
+      <p>本地服务已停止，可以直接关闭这个标签页。</p>
+    </div></div>`;
+  }
+}
+
 /* ── 选型页 ───────────────────────────────────────────────── */
 
 function viewDecide() {
@@ -454,7 +464,6 @@ function viewDecide() {
 
 function composerHtml() {
   const dbEmpty = !state.boot.stats.total;
-  const locked = updateLocked();
   const llmReady = Boolean(state.boot.llmReady);
   return `<section class="composer card">
     <div class="composer-head">
@@ -480,7 +489,7 @@ function composerHtml() {
             <input id="decideLimit" type="number" min="1" max="10" step="1" inputmode="numeric"
               value="${state.limit}" aria-label="每个组件的候选数（1–10）" />
           </label>
-          <button class="btn btn-primary" id="decideBtn" type="submit" ${dbEmpty || locked ? 'disabled' : ''}>${locked ? '更新中…' : '开始拆解'}</button>
+          <button class="btn btn-primary" id="decideBtn" type="submit" ${dbEmpty ? 'disabled' : ''}>开始拆解</button>
         </div>
       </div>
       <div class="examples">
@@ -488,7 +497,7 @@ function composerHtml() {
         ${EXAMPLES.map((x) => `<button type="button" class="example" data-action="example" data-need="${esc(x)}">${esc(x)}</button>`).join('')}
       </div>
     </form>
-    ${dbEmpty ? `<div class="notice mt-12">库里还没有数据。先在终端运行 <span class="mono">node oss.mjs harvest --full</span> 建库，再回来拆解。</div>` : ''}
+    ${dbEmpty ? `<div class="notice mt-12">库里还没有数据。先在终端运行 <span class="mono">oss harvest --full</span> 建库，再回来拆解。</div>` : ''}
     ${!dbEmpty && !llmReady ? `<div class="notice notice-info mt-12">当前为离线拆解：用 ${state.boot.stats.caps} 个能力标签的本地词表识别需求。点「AI 拆解」会跳到设置页填 API，配好后可切到 AI 拆解。</div>` : ''}
   </section>`;
 }
@@ -668,7 +677,6 @@ function candidateTable(candidates) {
 
 function viewFind() {
   const langs = state.boot.stats.langs ?? [];
-  const locked = updateLocked();
   return `<div class="page">
     <section class="search-card card">
       <form data-form="find">
@@ -678,7 +686,7 @@ function viewFind() {
             <input id="findQ" name="q" autocomplete="off" spellcheck="false"
               placeholder="关键词或一句话，例如：PDF 表格提取" value="${esc(state.findQuery)}" />
           </label>
-          <button class="btn btn-primary" type="submit" ${locked ? 'disabled' : ''}>${locked ? '更新中…' : '检索'}</button>
+          <button class="btn btn-primary" type="submit">检索</button>
         </div>
         <div class="filter-row">
           <label class="select">
@@ -759,7 +767,7 @@ function risingHtml() {
     return `<div class="empty mt-12">
       <div class="empty-icon">${iconSearch()}</div>
       <h3>还没有热度数据</h3>
-      <p>先跑一次 <span class="mono">node oss.mjs daily</span>，之后这里会显示涨得最快的项目。</p>
+      <p>先跑一次 <span class="mono">oss daily</span>，之后这里会显示涨得最快的项目。</p>
     </div>`;
   }
 
@@ -822,6 +830,20 @@ function renderCapsGrid() {
 
 /* ── 设置页 ───────────────────────────────────────────────── */
 
+function keyHintText(llm, ready) {
+  if (!llm.apiKeySet) {
+    return ready
+      ? '当前端点无需 Key（本地服务），已可启用 AI 拆解'
+      : '还没有可用的 Key，拆解会退化成能力词表兜底';
+  }
+  const src = llm.apiKeySource === 'env'
+    ? `来自环境变量 ${llm.apiKeyEnv || 'OPENAI_API_KEY'}，不会写入配置文件`
+    : llm.apiKeySource === 'file'
+      ? '来自 oss.config.json（明文保存）'
+      : '';
+  return `已保存 ${llm.apiKeyMasked || ''}${src ? ` · ${src}` : ''}`;
+}
+
 function viewSettings() {
   const p = state.boot.profile ?? {};
   const l = state.boot.llm ?? {};
@@ -831,11 +853,7 @@ function viewSettings() {
   const updating = upd.status === 'running';
   const prov = providerOf(l.baseUrl);
   const activeKey = prov?.key ?? 'custom';
-  const keyHint = l.apiKeySet
-    ? '当前已有可用 Key（来自环境变量或配置文件）'
-    : state.boot.llmReady
-      ? '当前端点无需 Key（本地服务），已可启用 AI 拆解'
-      : '还没有可用的 Key，拆解会退化成能力词表兜底';
+  const keyHint = keyHintText(l, state.boot.llmReady);
 
   return `<div class="page">
     <form class="settings" data-form="settings">
@@ -920,12 +938,16 @@ function viewSettings() {
             <span>超时（毫秒）</span>
             <input name="timeoutMs" type="number" min="1000" max="600000" step="1000" value="${l.timeoutMs ?? 60000}" />
           </label>
-          <label class="field span-2">
+          <div class="field span-2">
             <span>API Key</span>
-            <input name="apiKey" type="password" autocomplete="new-password"
-              placeholder="${l.apiKeySet ? '已保存；留空则不修改' : '填在这里会明文写入 oss.config.json'}" />
-            <small class="suffix">${keyHint}</small>
-          </label>
+            <div class="key-row">
+              <input name="apiKey" type="password" autocomplete="new-password"
+                placeholder="${l.apiKeySet ? '已保存；留空则不修改' : '填在这里会明文写入 oss.config.json'}" />
+              <button class="btn btn-sm" type="button" data-action="reveal-key" ${l.apiKeySet ? '' : 'hidden'}>查看已保存</button>
+            </div>
+            <small class="suffix" id="keyHint">${keyHint}</small>
+            <div class="key-preview mono" id="keyPreview" hidden></div>
+          </div>
         </div>
         <datalist id="modelOptions">${(prov?.models ?? []).map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
       </section>
@@ -960,6 +982,20 @@ function viewSettings() {
           }</p>
         </div>
         <button class="btn btn-sm" type="button" data-action="run-update" ${updating ? 'disabled' : ''}>${updating ? '更新中…' : '立即更新'}</button>
+      </div>
+    </section>
+
+    <section class="card form-card">
+      <header>
+        <h2>退出程序</h2>
+        <p>选型台在后台常驻，关闭浏览器标签不会退出；这里可以停掉本地服务。</p>
+      </header>
+      <div class="update-row">
+        <div class="update-row-main">
+          <span class="eyebrow">运行状态</span>
+          <p>退出后浏览器标签可以直接关闭，下次双击 exe 会重新启动。</p>
+        </div>
+        <button class="btn btn-sm btn-danger" type="button" data-action="quit">退出程序</button>
       </div>
     </section>
   </div>`;
@@ -1022,10 +1058,6 @@ async function runDecide() {
     ta?.focus();
     return;
   }
-  if (updateLocked()) {
-    toast('数据库正在更新，完成后自动解锁；也可以点上方的「先用现有库」', true);
-    return;
-  }
   if (state.busy) return;
 
   state.busy = true;
@@ -1038,7 +1070,7 @@ async function runDecide() {
   try {
     const data = await api('/api/decide', {
       method: 'POST',
-      body: { need, useLlm: state.useLlm, limit: state.limit, allowStale: state.skipUpdate },
+      body: { need, useLlm: state.useLlm, limit: state.limit },
     });
     state.decide = data.result;
     state.report = data.report;
@@ -1067,12 +1099,6 @@ async function runFind(query) {
     $('#findQ')?.focus();
     return;
   }
-  if (updateLocked()) {
-    state.findLoading = false;
-    if (state.page === 'find') renderPage();
-    toast('数据库正在更新，完成后自动解锁；也可以点上方的「先用现有库」', true);
-    return;
-  }
   if (state.busy) return;
 
   state.findQuery = q;
@@ -1084,7 +1110,6 @@ async function runFind(query) {
     const params = new URLSearchParams({ q, limit: String(state.findLimit) });
     if (state.findLang) params.set('lang', state.findLang);
     if (state.findStars) params.set('minStars', state.findStars);
-    if (state.skipUpdate) params.set('stale', '1');
     state.find = await api(`/api/find?${params}`);
     if (!state.find.results.length) toast('没有命中，换个说法或放宽筛选', true);
   } catch (err) {
@@ -1133,11 +1158,47 @@ async function saveSettings(form) {
       keyInput.value = '';
       keyInput.placeholder = saved.llm.apiKeySet ? '已保存；留空则不修改' : '填在这里会明文写入 oss.config.json';
     }
+    const hint = form.querySelector('#keyHint');
+    if (hint) hint.textContent = keyHintText(saved.llm, saved.llmReady);
+    const reveal = form.querySelector('[data-action="reveal-key"]');
+    if (reveal) {
+      reveal.hidden = !saved.llm.apiKeySet;
+      reveal.textContent = '查看已保存';
+    }
+    const preview = form.querySelector('#keyPreview');
+    if (preview) {
+      preview.hidden = true;
+      preview.textContent = '';
+    }
     toast('设置已保存');
   } catch (err) {
     toast(err.message, true);
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+/** 设置页显式点「查看已保存」时才向本地服务取明文 Key */
+async function revealKey() {
+  const box = $('#keyPreview');
+  const btn = $('[data-action="reveal-key"]');
+  if (!box || !btn) return;
+  if (!box.hidden) {
+    box.hidden = true;
+    box.textContent = '';
+    btn.textContent = '查看已保存';
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const { apiKey } = await api('/api/config/key');
+    box.textContent = apiKey || '没有保存 Key';
+    box.hidden = false;
+    btn.textContent = '隐藏';
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -1177,14 +1238,14 @@ document.addEventListener('click', (e) => {
     runDecide();
   } else if (action === 'cap') {
     openFind(el.dataset.zh ?? '');
-  } else if (action === 'skip-update') {
-    state.skipUpdate = true;
-    renderUpdateBar();
-    renderPage();
   } else if (action === 'run-update') {
     runUpdate();
+  } else if (action === 'quit') {
+    quitApp();
   } else if (action === 'pick-provider') {
     applyProvider(el.dataset.key);
+  } else if (action === 'reveal-key') {
+    revealKey();
   } else if (action === 'dismiss-update') {
     clearTimeout(state.updateHideTimer);
     const bar = $('#updateBar');
@@ -1286,7 +1347,7 @@ async function boot() {
     $('#content').innerHTML = `<div class="page"><div class="empty">
       <div class="empty-icon">${iconAlert()}</div>
       <h3>连不上本地服务</h3>
-      <p>${esc(err.message)}。确认终端里的 <span class="mono">node oss.mjs ui</span> 还在运行。</p>
+      <p>${esc(err.message)}。确认终端里的 <span class="mono">oss ui</span> 还在运行。</p>
     </div></div>`;
     return;
   }

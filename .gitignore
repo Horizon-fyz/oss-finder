@@ -7,5 +7,9 @@ oss.config.json
 *.log
 .DS_Store
 
+# exe 构建中间产物
+build/
+dist/
+
 # 设计参考库与本地工具缓存
 awesome-design-md/

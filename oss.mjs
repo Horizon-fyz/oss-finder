@@ -10,6 +10,8 @@
  *   oss show owner/repo                       看单个项目
  */
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { isSea } from 'node:sea';
 import { search, explain } from './src/search.mjs';
 import { harvest, retagAll } from './src/collect.mjs';
 import { stats, count, open, allRepos, topRising, seedSnapshots } from './src/db.mjs';
@@ -51,6 +53,7 @@ function num(key, def, { min = -Infinity, max = Infinity } = {}) {
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 const asJson = flags.has('json');
+const BIN = isSea() ? path.basename(process.execPath, '.exe') : 'node oss.mjs';
 
 const dim = (s) => `\x1b[90m${s}\x1b[0m`;
 const bold = (s) => `\x1b[1m${s}\x1b[0m`;
@@ -75,7 +78,7 @@ function printHit(hit, idx) {
 function requireDb() {
   const n = count();
   if (n === 0) {
-    console.log('库里还没有数据。先跑一次全量建库：\n  node oss.mjs harvest --full');
+    console.log(`库里还没有数据。先跑一次全量建库：\n  ${BIN} harvest --full`);
     process.exit(1);
   }
   return n;
@@ -84,7 +87,7 @@ function requireDb() {
 // ---------------- find ----------------
 function cmdFind() {
   if (!need) {
-    console.log('用法: node oss.mjs find "你的需求，中文英文都行"');
+    console.log(`用法: ${BIN} find "你的需求，中文英文都行"`);
     process.exit(1);
   }
   requireDb();
@@ -118,7 +121,7 @@ function cmdFind() {
 // ---------------- plan ----------------
 async function cmdPlan() {
   if (!need) {
-    console.log('用法: node oss.mjs plan "你要做的功能"');
+    console.log(`用法: ${BIN} plan "你要做的功能"`);
     process.exit(1);
   }
   requireDb();
@@ -160,7 +163,7 @@ async function cmdPlan() {
 // ---------------- decide ----------------
 async function cmdDecide() {
   if (!need) {
-    console.log('用法: node oss.mjs decide "你的需求" [--limit 5] [--out 报告.md] [--no-llm]');
+    console.log(`用法: ${BIN} decide "你的需求" [--limit 5] [--out 报告.md] [--no-llm]`);
     process.exit(1);
   }
   requireDb();
@@ -255,7 +258,7 @@ function cmdRising() {
     return;
   }
   if (!list.length) {
-    console.log('还没有足够的热度数据。先跑一次 `node oss.mjs daily`，明天开始就会积累增速。');
+    console.log(`还没有足够的热度数据。先跑一次 \`${BIN} daily\`，明天开始就会积累增速。`);
     return;
   }
 
@@ -305,33 +308,67 @@ function cmdShow() {
 }
 
 // ---------------- ui ----------------
+/** 端口被占用时，判断占用者是不是已经跑起来的选型台 */
+async function isRunningInstance(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data && data.stats);
+  } catch {
+    return false;
+  }
+}
+
 async function cmdUi() {
   requireDb();
-  const { startServer } = await import('./src/server.mjs');
+  const { startServer, openInBrowser } = await import('./src/server.mjs');
   const noUpdate = flags.has('no-update');
-  const { url } = await startServer({
-    port: num('port', 7788, { min: 1, max: 65535 }),
-    openBrowser: !flags.has('no-open'),
-    autoUpdate: !noUpdate,
-    updateOptions: {
-      discoveryQueries: num('queries', 6, { min: 1, max: 6 }),
-      watchCount: num('watch', 38, { min: 0, max: 100 }),
-      hnLimit: num('hn', 8, { min: 0, max: 50 }),
-    },
-  });
-  console.log(`选型台已启动：${url}`);
-  if (noUpdate) {
-    console.log(dim('已跳过启动更新（--no-update），检索直接使用现有库。'));
-  } else {
-    console.log(dim('正在后台更新数据库（发现新项目 + 刷新热度）；30 分钟内更新过会自动跳过，完成后界面解锁检索。'));
+  const port = num('port', 7788, { min: 1, max: 65535 });
+  try {
+    const { url } = await startServer({
+      port,
+      openBrowser: !flags.has('no-open'),
+      autoUpdate: !noUpdate,
+      updateOptions: {
+        discoveryQueries: num('queries', 6, { min: 1, max: 6 }),
+        watchCount: num('watch', 38, { min: 0, max: 100 }),
+        hnLimit: num('hn', 8, { min: 0, max: 50 }),
+      },
+    });
+    console.log(`选型台已启动：${url}`);
+    if (noUpdate) {
+      console.log(dim('已跳过启动更新（--no-update），检索直接使用现有库。'));
+    } else {
+      console.log(dim('正在后台更新数据库（发现新项目 + 刷新热度）；30 分钟内更新过会自动跳过，更新期间可正常检索。'));
+    }
+    console.log('按 Ctrl+C 停止。');
+  } catch (err) {
+    if (err?.code !== 'EADDRINUSE') throw err;
+    // 端口已被占用：如果占用的就是本程序，直接打开已有窗口，不重复起服务
+    if (await isRunningInstance(port)) {
+      const url = `http://127.0.0.1:${port}`;
+      console.log(`选型台已经在运行：${url}`);
+      if (!flags.has('no-open')) {
+        openInBrowser(url);
+        console.log(dim('已打开浏览器，本窗口可以关闭。'));
+      } else {
+        console.log(dim('本窗口可以关闭。'));
+      }
+      return;
+    }
+    console.error(`端口 ${port} 被其他程序占用。换一个端口再试，例如：\n  ${BIN} ui --port ${port + 1}`);
+    process.exitCode = 1;
   }
-  console.log('按 Ctrl+C 停止。');
 }
 
 // ---------------- main ----------------
+let fatalError = null;
 (async () => {
-  open();
   try {
+    open();
     switch (cmd) {
       case 'find': cmdFind(); break;
       case 'plan': await cmdPlan(); break;
@@ -345,6 +382,8 @@ async function cmdUi() {
       case 'show': cmdShow(); break;
       case 'ui': await cmdUi(); break;
       case undefined:
+        // 双击 exe（无参数）直接进图形界面；源码运行仍显示帮助
+        if (isSea()) { await cmdUi(); break; }
       case '-h':
       case '--help':
         console.log(`oss — 开源能力库
@@ -366,10 +405,26 @@ async function cmdUi() {
       --config oss.config.json  --out 报告路径  --no-llm（不调用大模型）`);
         break;
       default:
-        console.log(`未知命令：${cmd}。用 node oss.mjs --help 看用法。`);
+        console.log(`未知命令：${cmd}。用 ${BIN} --help 看用法。`);
         process.exitCode = 1;
     }
-  } finally {
-    // noop：DatabaseSync 在进程退出时自动释放
+  } catch (err) {
+    if (err?.code === 'EPIPE') return;
+    console.error(err?.stack || String(err));
+    fatalError = err?.message || String(err);
+    process.exitCode = 1;
+  }
+  // 双击 exe 时没有控制台，出错改用系统弹窗，否则用户只会看到程序一闪而过
+  if (isSea() && cmd === undefined && fatalError) {
+    spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show($env:OSS_FINDER_ERR, 'oss-finder', 'OK', 'Error')",
+      ],
+      { env: { ...process.env, OSS_FINDER_ERR: fatalError }, windowsHide: true }
+    );
   }
 })();
