@@ -1,0 +1,11 @@
+node_modules/
+data/
+reports/
+logs/
+oss.config.json
+.env
+*.log
+.DS_Store
+
+# 设计参考库与本地工具缓存
+awesome-design-md/

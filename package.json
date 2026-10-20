@@ -1,0 +1,18 @@
+{
+  "name": "oss",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "开源能力库：把功能需求拆成子能力，或直接匹配现成的 GitHub 项目",
+  "scripts": {
+    "find": "node oss.mjs find",
+    "plan": "node oss.mjs plan",
+    "harvest": "node oss.mjs harvest --per-day 10",
+    "harvest:full": "node oss.mjs harvest --full",
+    "retag": "node oss.mjs retag",
+    "stats": "node oss.mjs stats"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
