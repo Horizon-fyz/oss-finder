@@ -27,6 +27,7 @@ export function open(file = path.join(PATHS.data, 'oss.db')) {
       created_at  TEXT,
       pushed_at   TEXT,
       archived    INTEGER DEFAULT 0,
+      fork        INTEGER DEFAULT 0,
       homepage    TEXT,
       caps        TEXT DEFAULT '',
       cap_scores  TEXT DEFAULT '{}',
@@ -61,7 +62,12 @@ export function open(file = path.join(PATHS.data, 'oss.db')) {
   `);
 
   // 老库补列
-  for (const [col, type] of [['heat', 'REAL DEFAULT 0'], ['burst', 'INTEGER DEFAULT 0'], ['heat_at', 'TEXT']]) {
+  for (const [col, type] of [
+    ['heat', 'REAL DEFAULT 0'],
+    ['burst', 'INTEGER DEFAULT 0'],
+    ['heat_at', 'TEXT'],
+    ['fork', 'INTEGER DEFAULT 0'],
+  ]) {
     if (!db.prepare('PRAGMA table_info(repos)').all().some((c) => c.name === col)) {
       db.exec(`ALTER TABLE repos ADD COLUMN ${col} ${type}`);
     }
@@ -85,13 +91,13 @@ export function upsertRepo(repo, { caps = [], capScores = {}, quality = 0, sourc
     d.prepare(`
       UPDATE repos SET
         url=?, description=?, language=?, topics=?, topics_json=?, stars=?, forks=?,
-        license=?, created_at=?, pushed_at=?, archived=?, homepage=?, caps=?, cap_scores=?,
+        license=?, created_at=?, pushed_at=?, archived=?, fork=?, homepage=?, caps=?, cap_scores=?,
         quality=?, last_seen=?, prev_stars=?
       WHERE id = ?
     `).run(
       repo.html_url ?? '', repo.description ?? '', repo.language ?? '', topicsText, topicsJson,
       repo.stargazers_count ?? 0, repo.forks_count ?? 0, repo.license?.spdx_id ?? null,
-      repo.created_at ?? null, repo.pushed_at ?? null, repo.archived ? 1 : 0,
+      repo.created_at ?? null, repo.pushed_at ?? null, repo.archived ? 1 : 0, repo.fork ? 1 : 0,
       repo.homepage ?? null, capText, JSON.stringify(capScores), quality, nowIso(),
       existing.stars ?? 0, existing.id
     );
@@ -103,14 +109,14 @@ export function upsertRepo(repo, { caps = [], capScores = {}, quality = 0, sourc
 
   const info = d.prepare(`
     INSERT INTO repos (full_name, url, description, language, topics, topics_json, stars, forks,
-                       license, created_at, pushed_at, archived, homepage, caps, cap_scores,
+                       license, created_at, pushed_at, archived, fork, homepage, caps, cap_scores,
                        quality, source, first_seen, last_seen, prev_stars)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     repo.full_name, repo.html_url ?? '', repo.description ?? '', repo.language ?? '',
     topicsText, topicsJson, repo.stargazers_count ?? 0, repo.forks_count ?? 0,
     repo.license?.spdx_id ?? null, repo.created_at ?? null, repo.pushed_at ?? null,
-    repo.archived ? 1 : 0, repo.homepage ?? null, capText, JSON.stringify(capScores),
+    repo.archived ? 1 : 0, repo.fork ? 1 : 0, repo.homepage ?? null, capText, JSON.stringify(capScores),
     quality, source, nowIso(), nowIso(), repo.stargazers_count ?? 0
   );
   const id = Number(info.lastInsertRowid);
@@ -239,11 +245,9 @@ export function recordSnapshot(repoId, stars, { day = dateKey(), ageDays = null 
     const last = rows[rows.length - 1];
     const spanDays = Math.max(1, (new Date(last.day) - new Date(first.day)) / 864e5);
     heat = (last.stars - first.stars) / spanDays;
-    if (rows.length >= 2) {
-      const prev = rows[rows.length - 2];
-      const gap = Math.max(1, (new Date(last.day) - new Date(prev.day)) / 864e5);
-      burst = Math.round((last.stars - prev.stars) / gap);
-    }
+    const prev = rows[rows.length - 2];
+    const gap = Math.max(1, (new Date(last.day) - new Date(prev.day)) / 864e5);
+    burst = Math.round((last.stars - prev.stars) / gap);
   } else if (ageDays && ageDays > 0) {
     // 只有一次观测时，用「建仓以来的日均」当先验
     heat = stars / ageDays;
@@ -259,7 +263,12 @@ export function touchStars(repoId, stars, { day = dateKey(), ageDays = null } = 
   const d = open();
   const row = d.prepare('SELECT stars FROM repos WHERE id = ?').get(repoId);
   if (!row) return null;
-  d.prepare('UPDATE repos SET prev_stars = ?, stars = ?, last_seen = ? WHERE id = ?').run(row.stars, stars, day, repoId);
+  d.prepare('UPDATE repos SET prev_stars = ?, stars = ?, last_seen = ? WHERE id = ?').run(
+    row.stars,
+    stars,
+    nowIso(),
+    repoId
+  );
   return recordSnapshot(repoId, stars, { day, ageDays });
 }
 

@@ -12,7 +12,7 @@ const ghToken = () => process.env.GITHUB_TOKEN || process.env.GH_TOKEN || undefi
  * 发现新项目的查询：不按 topic 过滤，只看「创建得晚 + 涨得快」。
  * 这是抓「冷门项目突然爆火」的主通道——topic 搜索永远只会捞已经成名的。
  */
-export function risingQueries(dayOffset = new Date().getDate()) {
+export function risingQueries(dayOffset = Math.floor(Date.now() / 864e5)) {
   const lang = LANGS[dayOffset % LANGS.length];
   return [
     { id: 'new-3d', label: '三天内新项目', q: `created:>${shiftDays(-3)} stars:>15`, sort: 'stars' },
@@ -83,10 +83,6 @@ function ingest(repo, source) {
     recordSnapshot(id, repo.stargazers_count ?? 0, { ageDays: ageInDays(repo.created_at) });
   }
   return inserted;
-}
-
-export function hnBoostByRepo(results) {
-  return new Map(results.map((r) => [r.fullName, r]));
 }
 
 /**

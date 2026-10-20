@@ -112,7 +112,10 @@ export async function decomposeNeed(need, { profile = {}, llm = null, useLlm = t
   if (!useLlm) return taxonomyFallback(need, '已关闭 AI 拆解（界面开关或 --no-llm），拆解来自能力词表');
 
   if (!llmReady(llm)) {
-    return taxonomyFallback(need, '未配置 AI（oss.config.json 的 llm.apiKey 或环境变量 OSS_LLM_API_KEY），拆解来自能力词表');
+    return taxonomyFallback(
+      need,
+      '未配置 AI（需要在 llm.baseUrl 与 llm.model 中填入端点与模型；远程服务还需 API Key），拆解来自能力词表',
+    );
   }
 
   try {

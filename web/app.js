@@ -831,6 +831,11 @@ function viewSettings() {
   const updating = upd.status === 'running';
   const prov = providerOf(l.baseUrl);
   const activeKey = prov?.key ?? 'custom';
+  const keyHint = l.apiKeySet
+    ? '当前已有可用 Key（来自环境变量或配置文件）'
+    : state.boot.llmReady
+      ? '当前端点无需 Key（本地服务），已可启用 AI 拆解'
+      : '还没有可用的 Key，拆解会退化成能力词表兜底';
 
   return `<div class="page">
     <form class="settings" data-form="settings">
@@ -919,7 +924,7 @@ function viewSettings() {
             <span>API Key</span>
             <input name="apiKey" type="password" autocomplete="new-password"
               placeholder="${l.apiKeySet ? '已保存；留空则不修改' : '填在这里会明文写入 oss.config.json'}" />
-            <small class="suffix">${l.apiKeySet ? '当前已有可用 Key（来自环境变量或配置文件）' : '还没有可用的 Key，拆解会退化成能力词表兜底'}</small>
+            <small class="suffix">${keyHint}</small>
           </label>
         </div>
         <datalist id="modelOptions">${(prov?.models ?? []).map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>

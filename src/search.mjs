@@ -131,6 +131,8 @@ function isNoise(repo) {
  * 排序刻意让「能力匹配」压过「星数」，否则永远只会返回那些巨无霸项目。
  */
 export function search(need, { limit = 15, minStars = 0, language = null, candidates = 500 } = {}) {
+  const raw = Number(limit);
+  const take = Number.isFinite(raw) ? Math.min(200, Math.max(1, Math.trunc(raw))) : 15;
   const parsed = parseNeed(need);
   const match = buildMatch(parsed);
   if (!match) return { ...parsed, results: [] };
@@ -226,7 +228,7 @@ export function search(need, { limit = 15, minStars = 0, language = null, candid
   }
 
   scored.sort((a, b) => b.score - a.score);
-  return { ...parsed, results: scored.slice(0, limit) };
+  return { ...parsed, results: scored.slice(0, take) };
 }
 
 export function explain(hit) {

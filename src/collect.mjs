@@ -52,13 +52,23 @@ export async function harvest({ full = false, perDay = 10, perPage = 50 } = {}) 
   return { before, after, fetched, failed };
 }
 
+/** 解析库里的 topics_json，脏数据回退空数组，避免一条坏记录中断整轮重建 */
+function parseTopics(text) {
+  try {
+    const list = JSON.parse(text || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 重建标签（改了 taxonomy 之后用）：把已有仓库重新打标 */
 export function retagAll() {
   const d = open();
   const rows = d.prepare('SELECT * FROM repos').all();
   let n = 0;
   for (const row of rows) {
-    const topics = JSON.parse(row.topics_json || '[]');
+    const topics = parseTopics(row.topics_json);
     const repo = {
       full_name: row.full_name,
       html_url: row.url,
@@ -71,6 +81,7 @@ export function retagAll() {
       created_at: row.created_at,
       pushed_at: row.pushed_at,
       archived: !!row.archived,
+      fork: !!row.fork,
       homepage: row.homepage,
     };
     const tag = tagRepo(repo, { hintCap: String(row.caps || '').split(' ')[0] || null });

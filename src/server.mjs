@@ -18,7 +18,7 @@ import {
 } from './db.mjs';
 import { dailyUpdate } from './discover.mjs';
 import { CAPABILITIES, CAP_BY_ID } from './taxonomy.mjs';
-import { loadConfig } from './llm.mjs';
+import { loadConfig, llmReady } from './llm.mjs';
 import { PATHS, dateKey, writeText } from './lib.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -64,7 +64,7 @@ function configView(cfg) {
   return {
     profile: cfg.profile,
     llm: { ...rest, apiKeySet: Boolean(apiKey) },
-    llmReady: Boolean(apiKey && cfg.llm.baseUrl && cfg.llm.model),
+    llmReady: llmReady(cfg.llm),
     file: cfg.file,
   };
 }

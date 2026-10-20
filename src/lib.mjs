@@ -28,7 +28,7 @@ export function dateKey(d = new Date()) {
 }
 
 export function shiftDays(days, from = new Date()) {
-  return new Date(from.getTime() + days * 86400000).toISOString().slice(0, 10);
+  return dateKey(new Date(from.getTime() + days * 86400000));
 }
 
 export function daysBetween(aIso, bIso) {
@@ -67,10 +67,6 @@ export function log(msg) {
   } catch {
     /* 日志失败不影响主流程 */
   }
-}
-
-export function pick(arr, n) {
-  return arr.slice(0, n);
 }
 
 export function clamp(n, min, max) {

@@ -213,7 +213,7 @@ function decideComponent(comp, candidates, profile) {
     reasons.push(`覆盖度 ${pct(coverage)}、成熟度 ${evidence}/100，属于边界清晰的通用能力`);
     if (urgent) reasons.push('时间紧，优先接入而不是重造');
   } else if (coverage >= 0.45) {
-    action = best.licenseVerdict.ok ? 'fork' : 'borrow';
+    action = 'fork';
     reasons.push(`覆盖度 ${pct(coverage)}，主干可用但有明确缺口`);
     reasons.push(urgent ? '时间有限，fork 后只改缺口部分' : 'fork 后按缺口改造，比从零重写便宜');
   } else {
@@ -242,13 +242,15 @@ function decideComponent(comp, candidates, profile) {
  * 决策是确定性的规则打分，LLM 只负责拆解，避免模型对着候选名单编理由。
  */
 export async function decide(need, { profile = {}, llm = null, useLlm = true, limit = 5 } = {}) {
+  const raw = Number(limit);
+  const take = Number.isFinite(raw) ? clamp(Math.trunc(raw), 1, 10) : 5;
   const decomposed = await decomposeNeed(need, { profile, llm, useLlm });
 
   const components = decomposed.components.map((comp) => {
     const query = [comp.name, ...(comp.queries ?? [])].filter(Boolean).join(' ');
-    const res = search(query, { limit: Math.max(limit, 5) });
+    const res = search(query, { limit: Math.max(take, 5) });
     const candidates = res.results
-      .slice(0, limit)
+      .slice(0, take)
       .map((hit) => buildCandidate(hit, res, profile))
       .sort((a, b) => b.total - a.total);
 

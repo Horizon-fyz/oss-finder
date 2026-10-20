@@ -40,8 +40,19 @@ export function loadConfig(file = process.env.OSS_CONFIG || path.join(PATHS.root
   return { profile, llm: { ...llm, apiKey }, file };
 }
 
+/** 本地推理服务（Ollama / LM Studio 等）通常不校验 Key，配好端点与模型即可用 */
+function isLocalEndpoint(baseUrl) {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
 export function llmReady(llm) {
-  return Boolean(llm?.apiKey && llm?.baseUrl && llm?.model);
+  if (!llm?.baseUrl || !llm?.model) return false;
+  return Boolean(llm.apiKey || isLocalEndpoint(llm.baseUrl));
 }
 
 /** 从模型输出里抠 JSON：兼容 ```json 围栏和前后夹带的解释文字 */
@@ -63,12 +74,11 @@ export function parseJsonLoose(text) {
 
 async function requestChat(body, llm) {
   const url = String(llm.baseUrl).replace(/\/+$/, '') + '/chat/completions';
+  const headers = { 'Content-Type': 'application/json' };
+  if (llm.apiKey) headers.Authorization = `Bearer ${llm.apiKey}`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${llm.apiKey}`,
-    },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(Number(llm.timeoutMs) || 60000),
   });

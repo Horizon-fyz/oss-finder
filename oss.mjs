@@ -41,6 +41,15 @@ for (let i = 1; i < argv.length; i++) {
 }
 const need = words.join(' ');
 const opt = (k, d = null) => (flags.has(k) ? flags.get(k) : d);
+
+/** 数字参数：缺失或非法时回退默认值，并按上下限收敛，避免 NaN / 负数传到下游 */
+function num(key, def, { min = -Infinity, max = Infinity } = {}) {
+  const raw = opt(key);
+  if (raw === null || raw === '' || typeof raw === 'boolean') return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
 const asJson = flags.has('json');
 
 const dim = (s) => `\x1b[90m${s}\x1b[0m`;
@@ -80,8 +89,8 @@ function cmdFind() {
   }
   requireDb();
   const res = search(need, {
-    limit: Number(opt('limit', 12)),
-    minStars: Number(opt('min-stars', 0)),
+    limit: num('limit', 12, { min: 1, max: 200 }),
+    minStars: num('min-stars', 0, { min: 0 }),
     language: opt('lang'),
   });
 
@@ -160,7 +169,7 @@ async function cmdDecide() {
     profile: cfg.profile,
     llm: cfg.llm,
     useLlm: !flags.has('no-llm'),
-    limit: Number(opt('limit', 5)),
+    limit: num('limit', 5, { min: 1, max: 10 }),
   });
 
   if (asJson) {
@@ -200,7 +209,7 @@ async function cmdDecide() {
 // ---------------- harvest ----------------
 async function cmdHarvest() {
   const full = flags.has('full');
-  await harvest({ full, perDay: Number(opt('per-day', 10)) });
+  await harvest({ full, perDay: num('per-day', 10, { min: 1, max: 100 }) });
 }
 
 // ---------------- stats ----------------
@@ -235,9 +244,9 @@ function cmdCaps() {
 // ---------------- rising ----------------
 function cmdRising() {
   requireDb();
-  const limit = Number(opt('limit', 20));
-  const days = opt('days') ? Number(opt('days')) : null;
-  const rows = topRising({ limit: 300, minHeat: Number(opt('min-heat', 2)) });
+  const limit = num('limit', 20, { min: 1, max: 300 });
+  const days = flags.has('days') ? num('days', 0, { min: 1 }) : null;
+  const rows = topRising({ limit: 300, minHeat: num('min-heat', 2, { min: 0 }) });
   const now = Date.now();
   const list = (days ? rows.filter((r) => (now - new Date(r.first_seen).getTime()) / 864e5 <= days) : rows).slice(0, limit);
 
@@ -274,9 +283,9 @@ async function cmdDaily() {
   const seed = seedSnapshots();
   console.log(dim(`基线快照：+${seed.snapshots} 条，预热热度 ${seed.heatSeeded} 个项目`));
   await dailyUpdate({
-    discoveryQueries: Number(opt('queries', 6)),
-    watchCount: Number(opt('watch', 38)),
-    hnLimit: Number(opt('hn', 8)),
+    discoveryQueries: num('queries', 6, { min: 1, max: 6 }),
+    watchCount: num('watch', 38, { min: 0, max: 100 }),
+    hnLimit: num('hn', 8, { min: 0, max: 50 }),
   });
 }
 
@@ -301,13 +310,13 @@ async function cmdUi() {
   const { startServer } = await import('./src/server.mjs');
   const noUpdate = flags.has('no-update');
   const { url } = await startServer({
-    port: Number(opt('port', 7788)),
+    port: num('port', 7788, { min: 1, max: 65535 }),
     openBrowser: !flags.has('no-open'),
     autoUpdate: !noUpdate,
     updateOptions: {
-      discoveryQueries: Number(opt('queries', 6)),
-      watchCount: Number(opt('watch', 38)),
-      hnLimit: Number(opt('hn', 8)),
+      discoveryQueries: num('queries', 6, { min: 1, max: 6 }),
+      watchCount: num('watch', 38, { min: 0, max: 100 }),
+      hnLimit: num('hn', 8, { min: 0, max: 50 }),
     },
   });
   console.log(`选型台已启动：${url}`);
